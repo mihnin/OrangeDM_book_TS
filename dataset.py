@@ -90,8 +90,8 @@ def generate_time_series_with_trend_and_seasonality(dates, base_value, trend_fac
 
 def generate_dataset():
     # Определяем период - 10 лет
-    start_date = dt.date(2014, 1, 1)
-    end_date = dt.date(2023, 12, 31)
+    start_date = dt.date(2015, 1, 1)
+    end_date = dt.date(2024, 12, 31)
     
     # Генерируем список рабочих дней
     working_days = generate_working_days(start_date, end_date)
@@ -173,11 +173,18 @@ def export_to_excel(df, filename="financial_dataset.xlsx"):
     
     # Создаем писателя Excel
     with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
+        # Первая закладка - оригинальные данные
         df.to_excel(writer, sheet_name='Данные ЧОК', index=False)
         
         # Получаем доступ к листу для форматирования
         workbook = writer.book
         worksheet = writer.sheets['Данные ЧОК']
+        
+        # Явно форматируем столбец с датами
+        date_col_idx = df.columns.get_loc('Дата') + 1  # +1 для Excel индексации
+        for row_idx in range(2, len(df) + 2):  # начиная со второй строки (после заголовка)
+            cell = worksheet.cell(row=row_idx, column=1)  # Столбец Дата (A)
+            cell.number_format = 'dd.mm.yyyy'
         
         # Форматируем заголовки
         header_font = Font(bold=True)
@@ -198,6 +205,74 @@ def export_to_excel(df, filename="financial_dataset.xlsx"):
         for row_idx, row in enumerate(worksheet.iter_rows(min_row=2, max_row=len(df)+1, min_col=2, max_col=len(df.columns))):
             for cell in row:
                 cell.number_format = '#,##0.00₽'
+        
+        # Вторая закладка - данные в четырех столбцах (Дата, Статья, Контрагент, Сумма)
+        # Создаем копию DataFrame для преобразования
+        df_long = pd.DataFrame(columns=['Дата', 'Статья', 'Контрагент', 'Сумма'])
+        
+        # Для каждого числового столбца создаем отдельные строки
+        for column in df.columns:
+            if column == 'Дата':  # Пропускаем столбец с датами
+                continue
+                
+            # Определяем статью и контрагента
+            if column.startswith('ДЗ:'):
+                статья = 'Дебиторская задолженность'
+                контрагент = column[3:].strip()  # Убираем префикс "ДЗ: "
+            elif column.startswith('КЗ:'):
+                статья = 'Кредиторская задолженность'
+                контрагент = column[3:].strip()  # Убираем префикс "КЗ: "
+            elif column == 'Дебиторская задолженность ИТОГО':
+                статья = 'Дебиторская задолженность'
+                контрагент = 'ИТОГО'
+            elif column == 'Кредиторская задолженность ИТОГО':
+                статья = 'Кредиторская задолженность'
+                контрагент = 'ИТОГО'
+            else:
+                статья = column
+                контрагент = 'Н/Д'  # Не применимо
+            
+            # Создаем временный DataFrame для текущего столбца
+            temp_df = pd.DataFrame({
+                'Дата': df['Дата'],
+                'Статья': статья,
+                'Контрагент': контрагент,
+                'Сумма': df[column]
+            })
+            
+            # Добавляем в общий DataFrame
+            df_long = pd.concat([df_long, temp_df], ignore_index=True)
+        
+        # Сортируем по дате
+        df_long = df_long.sort_values('Дата')
+        
+        # Записываем преобразованный DataFrame во вторую закладку
+        df_long.to_excel(writer, sheet_name='Данные ЧОК (4 столбца)', index=False)
+        
+        # Форматирование второй закладки
+        worksheet2 = writer.sheets['Данные ЧОК (4 столбца)']
+        
+        # Применяем форматирование к заголовкам
+        for col_idx in range(1, 5):
+            cell = worksheet2.cell(row=1, column=col_idx)
+            cell.font = header_font
+            cell.alignment = header_alignment
+        
+        # Автоподбор ширины столбцов
+        worksheet2.column_dimensions['A'].width = 15  # Дата
+        worksheet2.column_dimensions['B'].width = 25  # Статья
+        worksheet2.column_dimensions['C'].width = 25  # Контрагент
+        worksheet2.column_dimensions['D'].width = 15  # Сумма
+        
+        # Форматируем столбец с датами на втором листе
+        for row_idx in range(2, len(df_long) + 2):
+            cell = worksheet2.cell(row=row_idx, column=1)  # Столбец Дата (A)
+            cell.number_format = 'dd.mm.yyyy'
+        
+        # Форматирование числовых значений
+        for row_idx in range(2, len(df_long) + 2):
+            cell = worksheet2.cell(row=row_idx, column=4)  # Столбец Сумма
+            cell.number_format = '#,##0.00₽'
     
     print(f"Данные успешно экспортированы в файл: {file_path}")
 
@@ -216,6 +291,9 @@ if __name__ == "__main__":
     print(f"Количество строк в 'ЧОК': {len(df['ЧОК'])}")
     print(f"Первые 5 значений 'Запасы': {df['Запасы'].head().tolist()}")
     print(f"Первые 5 значений 'ЧОК': {df['ЧОК'].head().tolist()}")
+    
+    # Добавляем проверку диапазона дат
+    print(f"\nДиапазон дат: от {df['Дата'].min().date()} до {df['Дата'].max().date()}")
     
     # Экспортируем в Excel
     print("\nЭкспорт данных в Excel...")
